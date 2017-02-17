@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import Tkinter as tk
+import tkinter as tk
 import logging, traceback
 logging.basicConfig(format='%(asctime)s %(levelname)10s: %(message)s', level = logging.DEBUG)
 
