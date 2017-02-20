@@ -2,12 +2,13 @@
 
 import tkinter as tk
 import logging, traceback
-logging.basicConfig(format='%(asctime)s %(levelname)10s: %(message)s', level = logging.DEBUG)
+logging.basicConfig(format='%(asctime)s %(levelname)10s: %(message)s', level = logging.INFO)
 from tkinter import messagebox
 import urllib
 import base64
 import platform, os
-from io import StringIO as sio
+from io import BytesIO
+import requests
 
 import sqlite3 as sql
 import contextlib as clib
@@ -85,7 +86,7 @@ class SonosList(tk.PanedWindow):
         self.label_queue = '{} - {}'
 
         self._create_widgets()
-        self._createMenu()
+        self._create_menu()
 
         parent.rowconfigure(0, weight = 1)
         parent.columnconfigure(0, weight = 1)
@@ -180,7 +181,7 @@ class SonosList(tk.PanedWindow):
         self._listbox = tk.Listbox(self._left,
                                    selectmode = tk.EXTENDED)
 
-        self._listbox.bind('<<ListboxSelect>>', self._listboxSelected)
+        self._listbox.bind('<<ListboxSelect>>', self._listbox_selected)
         
         self._listbox.grid(row = 0,
                            column = 0,
@@ -197,7 +198,7 @@ class SonosList(tk.PanedWindow):
 
         scrollbar.config(command = self._queuebox.yview)
         self._queuebox.config(yscrollcommand = scrollbar.set)
-        self._queuebox.bind('<Double-Button-1>', self._playSelectedQueueItem)
+        self._queuebox.bind('<Double-Button-1>', self._play_selected_queue_item)
         
         scrollbar.grid(row = 0,
                        column = 1,
@@ -210,7 +211,7 @@ class SonosList(tk.PanedWindow):
                             pady = 5,
                             sticky = 'news')
 
-        self._createButtons()
+        self._create_buttons()
                           
         self._left.rowconfigure(0, weight = 1)
         self._left.columnconfigure(0, weight = 1)
@@ -313,7 +314,7 @@ class SonosList(tk.PanedWindow):
                                         pady = 5,
                                         sticky = 'we')
 
-        self._info_widget['volume'].bind('<ButtonRelease-1>', self._volumeChanged)
+        self._info_widget['volume'].bind('<ButtonRelease-1>', self._volume_changed_event)
         infoIndex += 1
 
         ###################################
@@ -330,7 +331,7 @@ class SonosList(tk.PanedWindow):
                                            pady = 5,
                                            sticky = 'nw')
 
-    def __getSelectedSpeaker(self):
+    def __get_selected_speaker(self):
         if self.__current_speaker:
             return self.__current_speaker
         
@@ -347,7 +348,7 @@ class SonosList(tk.PanedWindow):
 
         return speaker
 
-    def __getSelectedQueueItem(self):
+    def __get_selected_queue_item(self):
         widget = self._queuebox
 
         selection = widget.curselection()
@@ -361,7 +362,7 @@ class SonosList(tk.PanedWindow):
 
         return track, index
         
-    def _volumeChanged(self, evt):
+    def _volume_changed_event(self, evt):
         if not self.__current_speaker:
             logging.warning('No speaker selected')
             return
@@ -384,13 +385,13 @@ class SonosList(tk.PanedWindow):
                 del self.__last_image
                 self.__last_image = None
         
-    def _listboxSelected(self, evt):
+    def _listbox_selected(self, evt):
         # Note here that Tkinter passes an event object to onselect()
         widget = evt.widget
 
         selection = widget.curselection()
         if not selection:
-            self.showSpeakerInfo(None)            
+            # self.show_speaker_info(None)
             self._update_buttons()
             self.__setConfig('last_selected', None)
             return
@@ -404,7 +405,7 @@ class SonosList(tk.PanedWindow):
             logging.info('Speaker already selected, skipping')
             return
         
-        self.showSpeakerInfo(speaker)
+        self.show_speaker_info(speaker)
         self._update_buttons()
                 
         logging.debug('Zoneplayer: "%s"', speaker)
@@ -413,9 +414,10 @@ class SonosList(tk.PanedWindow):
         self.__setConfig('last_selected', speaker.speaker_info['uid'])
         
 
-    def showSpeakerInfo(self, speaker, refresh_queue = True):
-        if not isinstance(speaker, soco.SoCo) and\
-           speaker is not None:
+    def show_speaker_info(self, speaker, refresh_queue=None):
+        refresh_queue = True
+        if speaker is not None and (
+            not isinstance(speaker, soco.SoCo)):
             raise TypeError('Unsupported type: %s', type(speaker))
 
         self.__current_speaker = speaker
@@ -424,7 +426,6 @@ class SonosList(tk.PanedWindow):
         self._info_widget['volume'].config(state = newState)
         
         if speaker is None:
-            # self.__clearQueue()
             for info in self._info_widget.keys():
                 if info == 'volume':
                     self._info_widget[info].set(0)
@@ -433,7 +434,8 @@ class SonosList(tk.PanedWindow):
                     self.__clear(info)
                     continue
                 
-                self._info_widget[info].config(text = self.empty_info)
+                self._info_widget[info].config(text=self.empty_info)
+            logging.info("Removed track info")
             return
 
         #######################
@@ -449,8 +451,9 @@ class SonosList(tk.PanedWindow):
             
             self.__clear('album_art')
             for info, value in track.items():
+                # import pdb; pdb.set_trace()
                 if info == 'album_art':
-                    self.__setAlbumArt(value, track_uri = playingTrack)
+                    self.__set_album_art(value, track_uri = playingTrack)
                     continue
                 elif info == 'volume':
                     self._info_widget[info].set(value)
@@ -461,6 +464,7 @@ class SonosList(tk.PanedWindow):
                 
                 label = self._info_widget[info]
                 label.config(text = value if value else self.empty_info)
+            logging.info("Set track info")
         except:
             errmsg = traceback.format_exc()
             logging.error(errmsg)
@@ -473,7 +477,7 @@ class SonosList(tk.PanedWindow):
         try:
             select = None
             if refresh_queue:
-                logging.info('Gettting queue from speaker')
+                logging.debug('Gettting queue from speaker')
                 queue = speaker.get_queue()
 
                 logging.debug('Deleting old items')
@@ -481,7 +485,6 @@ class SonosList(tk.PanedWindow):
 
                 logging.debug('Inserting items (%d) to listbox', len(queue))
                 for index, item in enumerate(queue):
-                    logging.info(item)
                     string = self.label_queue.format(item.creator, item.title)
                     self.__queue_content.append(item)
                     self._queuebox.insert(tk.END, string)
@@ -501,7 +504,7 @@ class SonosList(tk.PanedWindow):
                                    message = 'Could not receive speaker queue')
                 
 
-    def __setAlbumArt(self, url, track_uri = None):
+    def __set_album_art(self, url, track_uri = None):
         if ImageTk is None:
             logging.warning('python-imaging-tk lib missing, skipping album art')
             return
@@ -523,7 +526,7 @@ class SonosList(tk.PanedWindow):
                 resp = requests.get(url)
                 raw_data = resp.content
 
-            image = Image.open(sio.StringIO(raw_data))
+            image = Image.open(BytesIO(raw_data))
             widgetConfig = self._info_widget['album_art'].config()
             thumbSize = (int(widgetConfig['width'][4]),
                          int(widgetConfig['height'][4]))
@@ -545,13 +548,13 @@ class SonosList(tk.PanedWindow):
 
     def _update_buttons(self):
         logging.debug('Updating control buttons')
-        speaker = self.__getSelectedSpeaker()
+        speaker = self.__get_selected_speaker()
         
         newState = tk.ACTIVE if speaker else tk.DISABLED
         for button in self._control_buttons.values():
             button.config(state = newState)
         
-    def _createButtons(self):
+    def _create_buttons(self):
         logging.debug('Creating buttons')
         buttonIndex = 0
         buttonWidth = 2
@@ -604,7 +607,7 @@ class SonosList(tk.PanedWindow):
         self._control_buttons['next'] = button_next
         buttonIndex += 1
 
-    def _createMenu(self):
+    def _create_menu(self):
         logging.debug('Creating menu')
         self._menubar = tk.Menu(self)
         self.__parent.config(menu = self._menubar)
@@ -636,10 +639,10 @@ class SonosList(tk.PanedWindow):
                                        command = self.__next)
 
 
-    def _playSelectedQueueItem(self, evt):
+    def _play_selected_queue_item(self, evt):
         try:
-            track, track_index = self.__getSelectedQueueItem()
-            speaker = self.__getSelectedSpeaker()
+            track, track_index = self.__get_selected_queue_item()
+            speaker = self.__get_selected_speaker()
 
             if speaker is None or\
                track_index is None:
@@ -647,7 +650,7 @@ class SonosList(tk.PanedWindow):
                 return
             
             speaker.play_from_queue(track_index)
-            self.showSpeakerInfo(speaker, refresh_queue = False)
+            self.show_speaker_info(speaker, refresh_queue = False)
         except:
             logging.error('Could not play queue item')
             logging.error(traceback.format_exc())
@@ -656,36 +659,36 @@ class SonosList(tk.PanedWindow):
         
 
     def __previous(self):
-        speaker = self.__getSelectedSpeaker()
+        speaker = self.__get_selected_speaker()
         if not speaker:
             raise SystemError('No speaker selected, this should not happend')
 
         speaker.previous()
-        self.showSpeakerInfo(speaker, refresh_queue = False)
+        self.show_speaker_info(speaker, refresh_queue = False)
         
     def __next(self):
-        speaker = self.__getSelectedSpeaker()
+        speaker = self.__get_selected_speaker()
         if not speaker:
             raise SystemError('No speaker selected, this should not happend')
 
         speaker.next()
-        self.showSpeakerInfo(speaker, refresh_queue = False)
+        self.show_speaker_info(speaker, refresh_queue = False)
 
     def __pause(self):
-        speaker = self.__getSelectedSpeaker()
+        speaker = self.__get_selected_speaker()
         if not speaker:
             raise SystemError('No speaker selected, this should not happend')
 
         speaker.pause()
-        self.showSpeakerInfo(speaker, refresh_queue = False)
+        self.show_speaker_info(speaker, refresh_queue = False)
 
     def __play(self):
-        speaker = self.__getSelectedSpeaker()
+        speaker = self.__get_selected_speaker()
         if not speaker:
             raise SystemError('No speaker selected, this should not happend')
 
         speaker.play()
-        self.showSpeakerInfo(speaker, refresh_queue = False)
+        self.show_speaker_info(speaker, refresh_queue = False)
 
     def _load_settings(self):
         # Connect to database
@@ -740,7 +743,7 @@ class SonosList(tk.PanedWindow):
             self._listbox.selection_anchor(selectIndex)
             self._listbox.selection_set(selectIndex)
             self._listbox.see(selectIndex)
-            self.showSpeakerInfo(speaker)      
+            self.show_speaker_info(speaker)      
 
     def __setConfig(self, settingName, value):
         assert settingName is not None
