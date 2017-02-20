@@ -3,18 +3,19 @@
 import tkinter as tk
 import logging, traceback
 logging.basicConfig(format='%(asctime)s %(levelname)10s: %(message)s', level = logging.DEBUG)
-
-import tkMessageBox
+from tkinter import messagebox
 import urllib
 import base64
 import platform, os
-import StringIO as sio
+from io import StringIO as sio
 
 import sqlite3 as sql
 import contextlib as clib
 
 try:
     import soco
+    import soco.core
+    # from soco.core import Soco as SocoClass
 except:
     logging.warning('Could not import soco, trying from local file')
     try:
@@ -24,7 +25,7 @@ except:
     except:
         logging.error('Could not find SoCo library')
         soco = None
-        tkMessageBox.showerror(title = 'SoCo',
+        messagebox.showerror(title = 'SoCo',
                                message = 'Could not find SoCo library, make sure you have installed SoCo!',
                                parent = None)
         exit()
@@ -45,25 +46,14 @@ elif platform.system() == 'Linux':
     USER_DATA = '%(sep)shome%(sep)s%(name)s%(sep)s.config%(sep)sSoCo-Tk%(sep)s' % {
     'sep' : os.sep,
     'name': os.environ['LOGNAME']
-    }    
-##elif platform.system() == 'Mac':
-##    pass
+    }
 
-
-class WrappedSoCo(soco.SoCo):
-    def __init__(self, ip, get_info = True):
-        soco.SoCo.__init__(self, ip)
-        if get_info: self.get_speaker_info()
-        
-        invalid_keys = [key for key, value in self.speaker_info.items() if value is None]
-        for key in invalid_keys:
-            del self.speaker_info[key]
-        
-    def __str__(self):
-        name = self.speaker_info['zone_name']
-        if name is None:
-            name = 'Unnamed'
-        return name
+"""
+Monkey Patching!
+"""
+def better_display(self):
+        return "{} (\"{}\")".format(self.player_name, self.ip_address).title()
+soco.core.SoCo.__str__=better_display
 
 
 class SonosList(tk.PanedWindow):
@@ -72,7 +62,7 @@ class SonosList(tk.PanedWindow):
         self.__parent = parent
         tk.PanedWindow.__init__(self, parent, sashrelief = tk.RAISED)
 
-        self.__parent.protocol('WM_DELETE_WINDOW', self._cleanExit)
+        self.__parent.protocol('WM_DELETE_WINDOW', self._clean_exit)
         
         self.grid(row = 0,
                   column = 0,
@@ -80,41 +70,38 @@ class SonosList(tk.PanedWindow):
                   ipady = 5,
                   sticky = 'news')
 
-        self.__listContent = []
-        self.__queueContent = []
+        self.__list_content = []
+        self.__queue_content = []
 
-        self._controlButtons = {}
-        self._infoWidget = {}
+        self._control_buttons = {}
+        self._info_widget = {}
 
-        self.__lastSelected = None
-        self.__lastImage = None
-        self.__currentSpeaker = None
+        self.__last_selected = None
+        self.__last_image = None
+        self.__current_speaker = None
         self._connection = None
 
         self.empty_info = '-'
-        self.labelQueue = '%(artist)s - %(title)s'
+        self.label_queue = '{} - {}'
 
-        self._createWidgets()
+        self._create_widgets()
         self._createMenu()
-
-##        self.sash_place(0,150,400)
-##        self.sash_place(1,400,400)
 
         parent.rowconfigure(0, weight = 1)
         parent.columnconfigure(0, weight = 1)
         self.rowconfigure(0, weight = 1)
         self.columnconfigure(0, weight = 1)
 
-        self._loadSettings()
-        self._updateButtons()
+        self._load_settings()
+        self._update_buttons()
 
     def destroy(self):
         try:
-            del self.__listContent[:]
-            del self.__queueContent[:]
-            if self.__currentSpeaker:
-                del self.__currentSpeaker
-                self.__currentSpeaker = None
+            del self.__list_content[:]
+            del self.__queue_content[:]
+            if self.__current_speaker:
+                del self.__current_speaker
+                self.__current_speaker = None
 
             if self._connection:
                 logging.info('Closing database connection')
@@ -127,36 +114,13 @@ class SonosList(tk.PanedWindow):
     def __del__(self):
         self.destroy()
 
-    def get_speaker_ips(self):
-        disc = None
-        try:
-            disc = soco.SonosDiscovery()
-            return disc.get_speaker_ips()
-        finally:
-            if disc: del disc
-
-    def scanSpeakers(self):
-        ips = self.get_speaker_ips()
-
-        speakers = []
-        for ip in ips:
-            speaker = WrappedSoCo(ip)
-            if not speaker.speaker_info:
-                logging.warning('Speaker %s does not have any info (probably a bridge), skipping...', ip)
-                continue
-
-            speakers.append(speaker)
-
+    def scan_speakers(self):
+        speakers = list(soco.discover())
         logging.debug('Found %d speaker(s)', len(speakers))
-        if len(speakers) > 1:
-            logging.debug('Sorting speakers based on name')
-            speakers = sorted(speakers,
-                              cmp = lambda a,b: cmp(str(a), str(b)))
+        [s.get_speaker_info() for s in speakers]
+        self.__add_speakers(speakers)
 
-        self._storeSpeakers(speakers)
-        self.__addSpeakers(speakers)
-
-    def _cleanExit(self):
+    def _clean_exit(self):
         try:
             geometry = self.__parent.geometry()
             if geometry:
@@ -183,11 +147,11 @@ class SonosList(tk.PanedWindow):
             self.__parent.quit()
             
 
-    def __addSpeakers(self, speakers):
+    def __add_speakers(self, speakers):
         logging.debug('Deleting all items from list')
         self._listbox.delete(0, tk.END)
-        del self.__listContent[:]
-        self.__listContent = []
+        del self.__list_content[:]
+        self.__list_content = []
 
         if not speakers:
             logging.debug('No speakers to add, returning')
@@ -195,10 +159,10 @@ class SonosList(tk.PanedWindow):
         
         logging.debug('Inserting new items (%d)', len(speakers))
         for speaker in speakers:
-            self.__listContent.append(speaker)
+            self.__list_content.append(speaker)
             self._listbox.insert(tk.END, speaker)
         
-    def _createWidgets(self):
+    def _create_widgets(self):
         logging.debug('Creating widgets')
         # Left frame
         self._left = tk.Frame(self)
@@ -267,9 +231,9 @@ class SonosList(tk.PanedWindow):
         self._info.rowconfigure(9, weight = 1)
         self._info.columnconfigure(1, weight = 1)
 
-        self._createInfoWidgets()
+        self._create_info_widgets()
 
-    def _createInfoWidgets(self):
+    def _create_info_widgets(self):
         infoIndex = 0
 
         ###################################
@@ -280,11 +244,11 @@ class SonosList(tk.PanedWindow):
                    column = 0,
                    sticky = 'w')
         
-        self._infoWidget['title'] = tk.Label(self._info,
+        self._info_widget['title'] = tk.Label(self._info,
                                              text = self.empty_info,
                                              anchor = 'w')
         
-        self._infoWidget['title'].grid(row = infoIndex,
+        self._info_widget['title'].grid(row = infoIndex,
                                        column = 1,
                                        padx = 5,
                                        pady = 5,
@@ -299,11 +263,11 @@ class SonosList(tk.PanedWindow):
                    column = 0,
                    sticky = 'w')
         
-        self._infoWidget['artist'] = tk.Label(self._info,
+        self._info_widget['artist'] = tk.Label(self._info,
                                              text = self.empty_info,
                                              anchor = 'w')
         
-        self._infoWidget['artist'].grid(row = infoIndex,
+        self._info_widget['artist'].grid(row = infoIndex,
                                         column = 1,
                                         padx = 5,
                                         pady = 5,
@@ -318,11 +282,11 @@ class SonosList(tk.PanedWindow):
                    column = 0,
                    sticky = 'w')
         
-        self._infoWidget['album'] = tk.Label(self._info,
+        self._info_widget['album'] = tk.Label(self._info,
                                              text = self.empty_info,
                                              anchor = 'w')
         
-        self._infoWidget['album'].grid(row = infoIndex,
+        self._info_widget['album'].grid(row = infoIndex,
                                        column = 1,
                                        padx = 5,
                                        pady = 5,
@@ -337,38 +301,38 @@ class SonosList(tk.PanedWindow):
                    column = 0,
                    sticky = 'w')
         
-        self._infoWidget['volume'] = tk.Scale(self._info,
+        self._info_widget['volume'] = tk.Scale(self._info,
                                               from_ = 0,
                                               to = 100,
                                               tickinterval = 10,
                                               orient = tk.HORIZONTAL)
         
-        self._infoWidget['volume'].grid(row = infoIndex,
+        self._info_widget['volume'].grid(row = infoIndex,
                                         column = 1,
                                         padx = 5,
                                         pady = 5,
                                         sticky = 'we')
 
-        self._infoWidget['volume'].bind('<ButtonRelease-1>', self._volumeChanged)
+        self._info_widget['volume'].bind('<ButtonRelease-1>', self._volumeChanged)
         infoIndex += 1
 
         ###################################
         # Album art
         ###################################
-        self._infoWidget['album_art'] = tk.Label(self._info,
+        self._info_widget['album_art'] = tk.Label(self._info,
                                                  image = tk.PhotoImage(),
                                                  width = 150,
                                                  height = 150)
         
-        self._infoWidget['album_art'].grid(row = infoIndex,
+        self._info_widget['album_art'].grid(row = infoIndex,
                                            column = 1,
                                            padx = 5,
                                            pady = 5,
                                            sticky = 'nw')
 
     def __getSelectedSpeaker(self):
-        if self.__currentSpeaker:
-            return self.__currentSpeaker
+        if self.__current_speaker:
+            return self.__current_speaker
         
         widget = self._listbox
 
@@ -378,8 +342,8 @@ class SonosList(tk.PanedWindow):
 
         index = int(selection[0])
         
-        assert len(self.__listContent) > index
-        speaker = self.__listContent[index]
+        assert len(self.__list_content) > index
+        speaker = self.__list_content[index]
 
         return speaker
 
@@ -392,18 +356,18 @@ class SonosList(tk.PanedWindow):
 
         index = int(selection[0])
 
-        assert len(self.__queueContent) > index
-        track = self.__queueContent[index]
+        assert len(self.__queue_content) > index
+        track = self.__queue_content[index]
 
         return track, index
         
     def _volumeChanged(self, evt):
-        if not self.__currentSpeaker:
+        if not self.__current_speaker:
             logging.warning('No speaker selected')
             return
         
-        speaker = self.__currentSpeaker
-        volume = self._infoWidget['volume'].get()
+        speaker = self.__current_speaker
+        volume = self._info_widget['volume'].get()
 
         logging.debug('Changing volume to: %d', volume)
         speaker.volume(volume)
@@ -412,13 +376,13 @@ class SonosList(tk.PanedWindow):
         if typeName == 'queue':
             logging.debug('Deleting old items')
             self._queuebox.delete(0, tk.END)
-            del self.__queueContent[:]
-            self.__queueContent = []
+            del self.__queue_content[:]
+            self.__queue_content = []
         elif typeName == 'album_art':
-            self._infoWidget[typeName].config(image = None)
-            if self.__lastImage:
-                del self.__lastImage
-                self.__lastImage = None
+            self._info_widget[typeName].config(image = None)
+            if self.__last_image:
+                del self.__last_image
+                self.__last_image = None
         
     def _listboxSelected(self, evt):
         # Note here that Tkinter passes an event object to onselect()
@@ -427,21 +391,21 @@ class SonosList(tk.PanedWindow):
         selection = widget.curselection()
         if not selection:
             self.showSpeakerInfo(None)            
-            self._updateButtons()
+            self._update_buttons()
             self.__setConfig('last_selected', None)
             return
 
         index = int(selection[0])
         
-        assert len(self.__listContent) > index
-        speaker = self.__listContent[index]
+        assert len(self.__list_content) > index
+        speaker = self.__list_content[index]
 
-        if speaker == self.__currentSpeaker:
+        if speaker == self.__current_speaker:
             logging.info('Speaker already selected, skipping')
             return
         
         self.showSpeakerInfo(speaker)
-        self._updateButtons()
+        self._update_buttons()
                 
         logging.debug('Zoneplayer: "%s"', speaker)
 
@@ -454,22 +418,22 @@ class SonosList(tk.PanedWindow):
            speaker is not None:
             raise TypeError('Unsupported type: %s', type(speaker))
 
-        self.__currentSpeaker = speaker
+        self.__current_speaker = speaker
         
         newState = tk.ACTIVE if speaker is not None else tk.DISABLED
-        self._infoWidget['volume'].config(state = newState)
+        self._info_widget['volume'].config(state = newState)
         
         if speaker is None:
-            self.__clearQueue()
-            for info in self._infoWidget.keys():
+            # self.__clearQueue()
+            for info in self._info_widget.keys():
                 if info == 'volume':
-                    self._infoWidget[info].set(0)
+                    self._info_widget[info].set(0)
                     continue
                 elif info == 'album_art':
                     self.__clear(info)
                     continue
                 
-                self._infoWidget[info].config(text = self.empty_info)
+                self._info_widget[info].config(text = self.empty_info)
             return
 
         #######################
@@ -481,7 +445,7 @@ class SonosList(tk.PanedWindow):
             track = speaker.get_current_track_info()
             playingTrack = track['uri']
 
-            track['volume'] = speaker.volume()
+            track['volume'] = speaker.volume
             
             self.__clear('album_art')
             for info, value in track.items():
@@ -489,18 +453,18 @@ class SonosList(tk.PanedWindow):
                     self.__setAlbumArt(value, track_uri = playingTrack)
                     continue
                 elif info == 'volume':
-                    self._infoWidget[info].set(value)
+                    self._info_widget[info].set(value)
                     continue
-                elif info not in self._infoWidget:
+                elif info not in self._info_widget:
                     logging.debug('Skipping info "%s": "%s"', info, value)
                     continue
                 
-                label = self._infoWidget[info]
+                label = self._info_widget[info]
                 label.config(text = value if value else self.empty_info)
         except:
             errmsg = traceback.format_exc()
             logging.error(errmsg)
-            tkMessageBox.showerror(title = 'Speaker info...',
+            messagebox.showerror(title = 'Speaker info...',
                                    message = 'Could not receive speaker information')
 
         #######################
@@ -517,13 +481,14 @@ class SonosList(tk.PanedWindow):
 
                 logging.debug('Inserting items (%d) to listbox', len(queue))
                 for index, item in enumerate(queue):
-                    string = self.labelQueue % item
-                    self.__queueContent.append(item)
+                    logging.info(item)
+                    string = self.label_queue.format(item.creator, item.title)
+                    self.__queue_content.append(item)
                     self._queuebox.insert(tk.END, string)
 
             if playingTrack is not None:
-                for index, item in enumerate(self.__queueContent):
-                    if item['uri'] == playingTrack:
+                for index, item in enumerate(self.__queue_content):
+                    if item.resources[0].uri == playingTrack:
                         self._queuebox.selection_clear(0, tk.END)
                         self._queuebox.selection_anchor(index)
                         self._queuebox.selection_set(index)
@@ -532,7 +497,7 @@ class SonosList(tk.PanedWindow):
         except:
             errmsg = traceback.format_exc()
             logging.error(errmsg)
-            tkMessageBox.showerror(title = 'Queue...',
+            messagebox.showerror(title = 'Queue...',
                                    message = 'Could not receive speaker queue')
                 
 
@@ -553,47 +518,13 @@ class SonosList(tk.PanedWindow):
 
             raw_data = None
             
-            # Check for cached albumart
-            if track_uri:
-                try:
-                    __sql = '''
-                        SELECT image FROM images AS i
-                        WHERE
-                            i.uri = ?
-                        LIMIT 1
-                    '''
-                    with clib.closing(self._connection.execute(__sql, (track_uri,))) as cur:
-                        row = cur.fetchone()
-                        if row:
-                            logging.debug('Found album art for uri: "%s"', track_uri)
-                            raw_data = str(row['image'])
-                except:
-                    logging.warning('Could not load album art from database')
-                    logging.error(traceback.format_exc())
-
             if raw_data is None:
                 logging.info('Could not find cached album art, loading from URL')
-                connection = urllib.urlopen(url)
-                raw_data = connection.read()
-
-                try:
-                    __sql = '''
-                        INSERT OR REPLACE INTO images (
-                            uri,
-                            image
-                        ) VALUES (?, ?)
-                    '''
-                    logging.info('Storing album art for uri: "%s"', track_uri)
-                    self._connection.execute(__sql, (track_uri,
-                                                     buffer(raw_data))).close()
-
-                    self._connection.commit()
-                except:
-                    logging.error('Could not store album art')
-                    logging.error(traceback.format_exc())
+                resp = requests.get(url)
+                raw_data = resp.content
 
             image = Image.open(sio.StringIO(raw_data))
-            widgetConfig = self._infoWidget['album_art'].config()
+            widgetConfig = self._info_widget['album_art'].config()
             thumbSize = (int(widgetConfig['width'][4]),
                          int(widgetConfig['height'][4]))
 
@@ -601,7 +532,7 @@ class SonosList(tk.PanedWindow):
             image.thumbnail(thumbSize,
                             Image.ANTIALIAS)
             newImage = ImageTk.PhotoImage(image = image)
-            self._infoWidget['album_art'].config(image = newImage)
+            self._info_widget['album_art'].config(image = newImage)
         except:
             logging.error('Could not set album art, skipping...')
             logging.error(url)
@@ -609,15 +540,15 @@ class SonosList(tk.PanedWindow):
         finally:
             if connection: connection.close()
             
-            if self.__lastImage: del self.__lastImage
-            self.__lastImage = newImage
+            if self.__last_image: del self.__last_image
+            self.__last_image = newImage
 
-    def _updateButtons(self):
+    def _update_buttons(self):
         logging.debug('Updating control buttons')
         speaker = self.__getSelectedSpeaker()
         
         newState = tk.ACTIVE if speaker else tk.DISABLED
-        for button in self._controlButtons.values():
+        for button in self._control_buttons.values():
             button.config(state = newState)
         
     def _createButtons(self):
@@ -634,7 +565,7 @@ class SonosList(tk.PanedWindow):
                          padx = 5,
                          pady = 5,
                          sticky = 'w')
-        self._controlButtons['previous'] = button_prev
+        self._control_buttons['previous'] = button_prev
         buttonIndex += 1
 
         button_pause = tk.Button(self._left,
@@ -646,7 +577,7 @@ class SonosList(tk.PanedWindow):
                           padx = 5,
                           pady = 5,
                           sticky = 'w')
-        self._controlButtons['pause'] = button_pause
+        self._control_buttons['pause'] = button_pause
         buttonIndex += 1
 
         button_play = tk.Button(self._left,
@@ -658,7 +589,7 @@ class SonosList(tk.PanedWindow):
                          padx = 5,
                          pady = 5,
                          sticky = 'w')
-        self._controlButtons['play'] = button_play
+        self._control_buttons['play'] = button_play
         buttonIndex += 1
 
         button_next = tk.Button(self._left,
@@ -670,7 +601,7 @@ class SonosList(tk.PanedWindow):
                          padx = 5,
                          pady = 5,
                          sticky = 'w')
-        self._controlButtons['next'] = button_next
+        self._control_buttons['next'] = button_next
         buttonIndex += 1
 
     def _createMenu(self):
@@ -683,10 +614,10 @@ class SonosList(tk.PanedWindow):
         self._menubar.add_cascade(label="File", menu=self._filemenu)
 
         self._filemenu.add_command(label="Scan for speakers",
-                                   command=self.scanSpeakers)
+                                   command=self.scan_speakers)
         
         self._filemenu.add_command(label="Exit",
-                                   command=self._cleanExit)
+                                   command=self._clean_exit)
 
         # Playback menu
         self._playbackmenu = tk.Menu(self._menubar, tearoff=0)
@@ -720,7 +651,7 @@ class SonosList(tk.PanedWindow):
         except:
             logging.error('Could not play queue item')
             logging.error(traceback.format_exc())
-            tkMessageBox.showerror(title = 'Queue...',
+            messagebox.showerror(title = 'Queue...',
                                    message = 'Error playing queue item, please check error log for description')
         
 
@@ -756,7 +687,7 @@ class SonosList(tk.PanedWindow):
         speaker.play()
         self.showSpeakerInfo(speaker, refresh_queue = False)
 
-    def _loadSettings(self):
+    def _load_settings(self):
         # Connect to database
         dbPath = os.path.join(USER_DATA, 'SoCo-Tk.sqlite')
 
@@ -786,17 +717,12 @@ class SonosList(tk.PanedWindow):
                 logging.error('Could not set window geometry')
                 logging.error(traceback.format_exc())
 
-        # Load speakers
-        speakers = self._loadSpeakers()
-        if speakers:
-            self.__addSpeakers(speakers)
-        else:
-            message = 'No speakers found in your local configuration' \
-                      ', do you want to scan for speakers?'
-            
-            doscan = tkMessageBox.askyesno(title = 'Scan...',
-                                           message = message)
-            if doscan: self.scanSpeakers()
+
+        message = 'Do you want to scan for speakers?'
+        
+        doscan = messagebox.askyesno(title = 'Scan...',
+                                       message = message)
+        if doscan: self.scan_speakers()
 
         # Load last selected speaker
         selected_speaker_uid = self.__getConfig('last_selected')
@@ -804,7 +730,7 @@ class SonosList(tk.PanedWindow):
 
         selectIndex = None
         selectSpeaker = None
-        for index, speaker in enumerate(self.__listContent):
+        for index, speaker in enumerate(self.__list_content):
             if speaker.speaker_info['uid'] == selected_speaker_uid:
                 selectIndex = index
                 selectSpeaker = speaker
@@ -814,85 +740,7 @@ class SonosList(tk.PanedWindow):
             self._listbox.selection_anchor(selectIndex)
             self._listbox.selection_set(selectIndex)
             self._listbox.see(selectIndex)
-            self.showSpeakerInfo(speaker)
-
-##        # Load sash_coordinates
-##        sashes = self.__getConfig('sash_coordinates')
-##        if sashes:
-##            for sash_info in sashes.split(','):
-##                if len(sash_info) < 1: continue
-##                try:
-##                    logging.debug('Setting sash: "%s"' % sash_info)
-##                    index, x, y = map(int, sash_info.split(':'))
-##                    self.sash_place(index, x, y)
-##                except:
-##                    logging.error('Could not set sash: "%s"' % sash_info)
-##                    logging.error(traceback.format_exc())
-##
-##            
-
-    def _storeSpeakers(self, speakers):
-        logging.debug('Removing old speakers')
-        self._connection.execute('DELETE FROM speakers').close()
-        self._connection.commit()
-
-        __sql = '''
-            INSERT INTO speakers(
-                name,
-                ip,
-                uid,
-                serial,
-                mac
-            ) VALUES (?, ?, ?, ?, ?)
-        '''
-        
-        logging.debug('Storing speakers (size: %d)', len(speakers))
-        for speaker in speakers:
-            try:
-                params = (
-                    speaker.speaker_info['zone_name'],
-                    speaker.speaker_ip,
-                    speaker.speaker_info['uid'],
-                    speaker.speaker_info['serial_number'],
-                    speaker.speaker_info['mac_address'],
-                    )
-                self._connection.execute(__sql, params).close()
-            except:
-                logging.error('Could not insert speaker: %s', speaker)
-                logging.error(traceback.format_exc())
-                
-        self._connection.commit()
-        
-    def _loadSpeakers(self):
-        logging.info('Loading speakers from config')
-        __sql = '''
-            SELECT
-                speaker_id,
-                name,
-                ip,
-                uid,
-                serial,
-                mac
-            FROM speakers
-        '''
-
-        speakers = []
-        with clib.closing(self._connection.execute(__sql)) as cur:
-            for row in cur:
-                speaker_id = None
-                try:
-                    speaker_id = row['speaker_id']
-                    speaker = WrappedSoCo(row['ip'], get_info = False)
-                    speaker.speaker_info['zone_name'] =         row['name']
-                    speaker.speaker_info['uid'] =               row['uid']
-                    speaker.speaker_info['serial_number'] =     row['serial']
-                    speaker.speaker_info['mac_address'] =       row['mac']
-                    speakers.append(speaker)
-                except:
-                    logging.error('Could not load speaker (id: %s)' % speaker_id)
-                    logging.error(traceback.format_exc())
-
-        return speakers
+            self.showSpeakerInfo(speaker)      
 
     def __setConfig(self, settingName, value):
         assert settingName is not None
