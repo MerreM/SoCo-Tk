@@ -15,4 +15,4 @@ I'm updating the code to run in python 3.5 and generally tidy some stuff up, as 
 
 ## Contributing
 
-If you're interested in contributing, drop me a mesage on here, or set up a pull request and I'll try adn get back to you!
+If you're interested in contributing, drop me a mesage on here, or set up a pull request and I'll try and get back to you!

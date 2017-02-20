@@ -1,17 +1,17 @@
 #!/usr/bin/env python
 
-import tkinter as tk
-import logging, traceback
-logging.basicConfig(format='%(asctime)s %(levelname)10s: %(message)s', level = logging.INFO)
-from tkinter import messagebox
-import urllib
-import base64
-import platform, os
-from io import BytesIO
-import requests
-
-import sqlite3 as sql
 import contextlib as clib
+import logging
+import tkinter as tk
+import traceback
+import platform
+import os
+import sqlite3 as sql
+from io import BytesIO
+
+
+import requests
+from tkinter import messagebox
 
 try:
     import soco
@@ -39,15 +39,16 @@ except:
     ImageTk = None
     Image = None
 
+logging.basicConfig(format='%(asctime)s %(levelname)10s: %(message)s', level = logging.INFO)
+
 USER_DATA = None
 
 if platform.system() == 'Windows':
     USER_DATA = os.path.join(os.getenv('APPDATA'), 'SoCo-Tk')
 elif platform.system() == 'Linux':
-    USER_DATA = '%(sep)shome%(sep)s%(name)s%(sep)s.config%(sep)sSoCo-Tk%(sep)s' % {
-    'sep' : os.sep,
-    'name': os.environ['LOGNAME']
-    }
+    USER_DATA = './data/'
+
+
 
 """
 Monkey Patching!
@@ -57,13 +58,14 @@ def better_display(self):
 soco.core.SoCo.__str__=better_display
 
 
+
 class SonosList(tk.PanedWindow):
 
     def __init__(self, parent):
         self.__parent = parent
         tk.PanedWindow.__init__(self, parent, sashrelief = tk.RAISED)
 
-        self.__parent.protocol('WM_DELETE_WINDOW', self._clean_exit)
+        self.__parent.protocol('WM_DELETE_WINDOW', self.clean_exit)
         
         self.grid(row = 0,
                   column = 0,
@@ -75,7 +77,7 @@ class SonosList(tk.PanedWindow):
         self.__queue_content = []
 
         self._control_buttons = {}
-        self._info_widget = {}
+        self.now_playing_widget = {}
 
         self.__last_selected = None
         self.__last_image = None
@@ -85,7 +87,7 @@ class SonosList(tk.PanedWindow):
         self.empty_info = '-'
         self.label_queue = '{} - {}'
 
-        self._create_widgets()
+        self.create_widgets()
         self._create_menu()
 
         parent.rowconfigure(0, weight = 1)
@@ -119,9 +121,9 @@ class SonosList(tk.PanedWindow):
         speakers = list(soco.discover())
         logging.debug('Found %d speaker(s)', len(speakers))
         [s.get_speaker_info() for s in speakers]
-        self.__add_speakers(speakers)
+        self.add_speakers(speakers)
 
-    def _clean_exit(self):
+    def clean_exit(self):
         try:
             geometry = self.__parent.geometry()
             if geometry:
@@ -148,7 +150,7 @@ class SonosList(tk.PanedWindow):
             self.__parent.quit()
             
 
-    def __add_speakers(self, speakers):
+    def add_speakers(self, speakers):
         logging.debug('Deleting all items from list')
         self._listbox.delete(0, tk.END)
         del self.__list_content[:]
@@ -163,7 +165,7 @@ class SonosList(tk.PanedWindow):
             self.__list_content.append(speaker)
             self._listbox.insert(tk.END, speaker)
         
-    def _create_widgets(self):
+    def create_widgets(self):
         logging.debug('Creating widgets')
         # Left frame
         self._left = tk.Frame(self)
@@ -232,106 +234,106 @@ class SonosList(tk.PanedWindow):
         self._info.rowconfigure(9, weight = 1)
         self._info.columnconfigure(1, weight = 1)
 
-        self._create_info_widgets()
+        self.createnow_playing_widgets()
 
-    def _create_info_widgets(self):
-        infoIndex = 0
+    def createnow_playing_widgets(self):
+        info_index = 0
 
         ###################################
         # Title
         ###################################
         label = tk.Label(self._info, text = 'Title:')
-        label.grid(row = infoIndex,
+        label.grid(row = info_index,
                    column = 0,
                    sticky = 'w')
         
-        self._info_widget['title'] = tk.Label(self._info,
+        self.now_playing_widget['title'] = tk.Label(self._info,
                                              text = self.empty_info,
                                              anchor = 'w')
         
-        self._info_widget['title'].grid(row = infoIndex,
+        self.now_playing_widget['title'].grid(row = info_index,
                                        column = 1,
                                        padx = 5,
                                        pady = 5,
                                        sticky = 'we')
-        infoIndex += 1
+        info_index += 1
 
         ###################################
         # Artist
         ###################################
         label = tk.Label(self._info, text = 'Artist:')
-        label.grid(row = infoIndex,
+        label.grid(row = info_index,
                    column = 0,
                    sticky = 'w')
         
-        self._info_widget['artist'] = tk.Label(self._info,
+        self.now_playing_widget['artist'] = tk.Label(self._info,
                                              text = self.empty_info,
                                              anchor = 'w')
         
-        self._info_widget['artist'].grid(row = infoIndex,
+        self.now_playing_widget['artist'].grid(row = info_index,
                                         column = 1,
                                         padx = 5,
                                         pady = 5,
                                         sticky = 'we')
-        infoIndex += 1
+        info_index += 1
 
         ###################################
         # Album
         ###################################
         label = tk.Label(self._info, text = 'Album:')
-        label.grid(row = infoIndex,
+        label.grid(row = info_index,
                    column = 0,
                    sticky = 'w')
         
-        self._info_widget['album'] = tk.Label(self._info,
+        self.now_playing_widget['album'] = tk.Label(self._info,
                                              text = self.empty_info,
                                              anchor = 'w')
         
-        self._info_widget['album'].grid(row = infoIndex,
+        self.now_playing_widget['album'].grid(row = info_index,
                                        column = 1,
                                        padx = 5,
                                        pady = 5,
                                        sticky = 'we')
-        infoIndex += 1
+        info_index += 1
 
         ###################################
         # Volume
         ###################################
         label = tk.Label(self._info, text = 'Volume:')
-        label.grid(row = infoIndex,
+        label.grid(row = info_index,
                    column = 0,
                    sticky = 'w')
         
-        self._info_widget['volume'] = tk.Scale(self._info,
+        self.now_playing_widget['volume'] = tk.Scale(self._info,
                                               from_ = 0,
                                               to = 100,
                                               tickinterval = 10,
                                               orient = tk.HORIZONTAL)
         
-        self._info_widget['volume'].grid(row = infoIndex,
+        self.now_playing_widget['volume'].grid(row = info_index,
                                         column = 1,
                                         padx = 5,
                                         pady = 5,
                                         sticky = 'we')
 
-        self._info_widget['volume'].bind('<ButtonRelease-1>', self._volume_changed_event)
-        infoIndex += 1
+        self.now_playing_widget['volume'].bind('<ButtonRelease-1>', self.volume_changed_event)
+        info_index += 1
 
         ###################################
         # Album art
         ###################################
-        self._info_widget['album_art'] = tk.Label(self._info,
+        self.now_playing_widget['album_art'] = tk.Label(self._info,
                                                  image = tk.PhotoImage(),
                                                  width = 150,
                                                  height = 150)
         
-        self._info_widget['album_art'].grid(row = infoIndex,
+        self.now_playing_widget['album_art'].grid(row = info_index,
                                            column = 1,
                                            padx = 5,
                                            pady = 5,
                                            sticky = 'nw')
 
-    def __get_selected_speaker(self):
+    def get_selected_speaker(self):
         if self.__current_speaker:
             return self.__current_speaker
         
@@ -348,7 +350,7 @@ class SonosList(tk.PanedWindow):
 
         return speaker
 
-    def __get_selected_queue_item(self):
+    def get_selected_queue_item(self):
         widget = self._queuebox
 
         selection = widget.curselection()
@@ -362,25 +364,25 @@ class SonosList(tk.PanedWindow):
 
         return track, index
         
-    def _volume_changed_event(self, evt):
+    def volume_changed_event(self, evt):
         if not self.__current_speaker:
             logging.warning('No speaker selected')
             return
         
         speaker = self.__current_speaker
-        volume = self._info_widget['volume'].get()
+        volume = self.now_playing_widget['volume'].get()
 
         logging.debug('Changing volume to: %d', volume)
         speaker.volume(volume)
 
-    def __clear(self, typeName):
-        if typeName == 'queue':
+    def clear(self, type_name):
+        if type_name == 'queue':
             logging.debug('Deleting old items')
             self._queuebox.delete(0, tk.END)
             del self.__queue_content[:]
             self.__queue_content = []
-        elif typeName == 'album_art':
-            self._info_widget[typeName].config(image = None)
+        elif type_name == 'album_art':
+            self.now_playing_widget[type_name].config(image = None)
             if self.__last_image:
                 del self.__last_image
                 self.__last_image = None
@@ -422,47 +424,47 @@ class SonosList(tk.PanedWindow):
 
         self.__current_speaker = speaker
         
-        newState = tk.ACTIVE if speaker is not None else tk.DISABLED
-        self._info_widget['volume'].config(state = newState)
+        new_state = tk.ACTIVE if speaker is not None else tk.DISABLED
+        self.now_playing_widget['volume'].config(state=new_state)
         
         if speaker is None:
-            for info in self._info_widget.keys():
+            for info in self.now_playing_widget.keys():
                 if info == 'volume':
-                    self._info_widget[info].set(0)
+                    self.now_playing_widget[info].set(0)
                     continue
                 elif info == 'album_art':
-                    self.__clear(info)
+                    self.clear(info)
                     continue
                 
-                self._info_widget[info].config(text=self.empty_info)
+                self.now_playing_widget[info].config(text=self.empty_info)
             logging.info("Removed track info")
             return
 
         #######################
         # Load speaker info
         #######################
-        playingTrack = None
+        playing_track = None
         try:
             logging.info('Receive speaker info from: "%s"' % speaker)
             track = speaker.get_current_track_info()
-            playingTrack = track['uri']
+            playing_track = track['uri']
 
             track['volume'] = speaker.volume
             
-            self.__clear('album_art')
+            self.clear('album_art')
             for info, value in track.items():
                 # import pdb; pdb.set_trace()
                 if info == 'album_art':
-                    self.__set_album_art(value, track_uri = playingTrack)
+                    self.set_album_art(value, track_uri = playing_track)
                     continue
                 elif info == 'volume':
-                    self._info_widget[info].set(value)
+                    self.now_playing_widget[info].set(value)
                     continue
-                elif info not in self._info_widget:
+                elif info not in self.now_playing_widget:
                     logging.debug('Skipping info "%s": "%s"', info, value)
                     continue
                 
-                label = self._info_widget[info]
+                label = self.now_playing_widget[info]
                 label.config(text = value if value else self.empty_info)
             logging.info("Set track info")
         except:
@@ -481,7 +483,7 @@ class SonosList(tk.PanedWindow):
                 queue = speaker.get_queue()
 
                 logging.debug('Deleting old items')
-                self.__clear('queue')
+                self.clear('queue')
 
                 logging.debug('Inserting items (%d) to listbox', len(queue))
                 for index, item in enumerate(queue):
@@ -489,9 +491,9 @@ class SonosList(tk.PanedWindow):
                     self.__queue_content.append(item)
                     self._queuebox.insert(tk.END, string)
 
-            if playingTrack is not None:
+            if playing_track is not None:
                 for index, item in enumerate(self.__queue_content):
-                    if item.resources[0].uri == playingTrack:
+                    if item.resources[0].uri == playing_track:
                         self._queuebox.selection_clear(0, tk.END)
                         self._queuebox.selection_anchor(index)
                         self._queuebox.selection_set(index)
@@ -502,40 +504,68 @@ class SonosList(tk.PanedWindow):
             logging.error(errmsg)
             messagebox.showerror(title = 'Queue...',
                                    message = 'Could not receive speaker queue')
+
+
+    def get_album_art_from_database(self, track_uri):
+        if not self._connection:
+            logging.error("No database connection to get art from.")
+            return None
+        elif not track_uri:
+            logging.error("No URI to query.")
+            return None
+        c = self._connection.cursor()
+        c.execute("SELECT * FROM images where uri=?", (track_uri,))
+        top_res = c.fetchone()
+        if top_res:
+            return top_res[1]
+        return None
+
+    def set_album_art_in_database(self, track_uri, data):
+        if not self._connection:
+            logging.error("No database connection to get art from.")
+            return None
+        elif not track_uri or not data:
+            logging.error("No URI or data to insert.")
+            return None
+        c = self._connection.cursor()
+        c.execute("INSERT INTO images VALUES (?, ?)",(track_uri, data))
+
                 
 
-    def __set_album_art(self, url, track_uri = None):
+    def set_album_art(self, url, track_uri=None):
         if ImageTk is None:
             logging.warning('python-imaging-tk lib missing, skipping album art')
             return
 
         if not url:
-            logging.warning('url is empty, returnning')
+            logging.warning('url is empty, returning')
             return
 
         connection = None
-        newImage = None
+        new_image = None
+        raw_data = None
         
         # Receive Album art, resize it and show it
         try:
 
-            raw_data = None
-            
+            raw_data = self.get_album_art_from_database(track_uri)
+
             if raw_data is None:
                 logging.info('Could not find cached album art, loading from URL')
                 resp = requests.get(url)
                 raw_data = resp.content
+                self.set_album_art_in_database(track_uri, raw_data)
 
             image = Image.open(BytesIO(raw_data))
-            widgetConfig = self._info_widget['album_art'].config()
+            widgetConfig = self.now_playing_widget['album_art'].config()
             thumbSize = (int(widgetConfig['width'][4]),
                          int(widgetConfig['height'][4]))
 
             logging.debug('Resizing album art to: %s', thumbSize)
             image.thumbnail(thumbSize,
                             Image.ANTIALIAS)
-            newImage = ImageTk.PhotoImage(image = image)
-            self._info_widget['album_art'].config(image = newImage)
+            new_image = ImageTk.PhotoImage(image = image)
+            self.now_playing_widget['album_art'].config(image = new_image)
         except:
             logging.error('Could not set album art, skipping...')
             logging.error(url)
@@ -544,15 +574,15 @@ class SonosList(tk.PanedWindow):
             if connection: connection.close()
             
             if self.__last_image: del self.__last_image
-            self.__last_image = newImage
+            self.__last_image = new_image
 
     def _update_buttons(self):
         logging.debug('Updating control buttons')
-        speaker = self.__get_selected_speaker()
+        speaker = self.get_selected_speaker()
         
-        newState = tk.ACTIVE if speaker else tk.DISABLED
+        new_state = tk.ACTIVE if speaker else tk.DISABLED
         for button in self._control_buttons.values():
-            button.config(state = newState)
+            button.config(state = new_state)
         
     def _create_buttons(self):
         logging.debug('Creating buttons')
@@ -620,7 +650,7 @@ class SonosList(tk.PanedWindow):
                                    command=self.scan_speakers)
         
         self._filemenu.add_command(label="Exit",
-                                   command=self._clean_exit)
+                                   command=self.clean_exit)
 
         # Playback menu
         self._playbackmenu = tk.Menu(self._menubar, tearoff=0)
@@ -641,8 +671,8 @@ class SonosList(tk.PanedWindow):
 
     def _play_selected_queue_item(self, evt):
         try:
-            track, track_index = self.__get_selected_queue_item()
-            speaker = self.__get_selected_speaker()
+            track, track_index = self.get_selected_queue_item()
+            speaker = self.get_selected_speaker()
 
             if speaker is None or\
                track_index is None:
@@ -659,7 +689,7 @@ class SonosList(tk.PanedWindow):
         
 
     def __previous(self):
-        speaker = self.__get_selected_speaker()
+        speaker = self.get_selected_speaker()
         if not speaker:
             raise SystemError('No speaker selected, this should not happend')
 
@@ -667,7 +697,7 @@ class SonosList(tk.PanedWindow):
         self.show_speaker_info(speaker, refresh_queue = False)
         
     def __next(self):
-        speaker = self.__get_selected_speaker()
+        speaker = self.get_selected_speaker()
         if not speaker:
             raise SystemError('No speaker selected, this should not happend')
 
@@ -675,7 +705,7 @@ class SonosList(tk.PanedWindow):
         self.show_speaker_info(speaker, refresh_queue = False)
 
     def __pause(self):
-        speaker = self.__get_selected_speaker()
+        speaker = self.get_selected_speaker()
         if not speaker:
             raise SystemError('No speaker selected, this should not happend')
 
@@ -683,7 +713,7 @@ class SonosList(tk.PanedWindow):
         self.show_speaker_info(speaker, refresh_queue = False)
 
     def __play(self):
-        speaker = self.__get_selected_speaker()
+        speaker = self.get_selected_speaker()
         if not speaker:
             raise SystemError('No speaker selected, this should not happend')
 
@@ -692,22 +722,22 @@ class SonosList(tk.PanedWindow):
 
     def _load_settings(self):
         # Connect to database
-        dbPath = os.path.join(USER_DATA, 'SoCo-Tk.sqlite')
+        self.dbPath = os.path.join(USER_DATA, 'SoCo-Tk.sqlite')
 
-        createStructure = False
-        if not os.path.exists(dbPath):
-            logging.info('Database "%s" not found, creating', dbPath)
-            createStructure = True
+        create_structure = False
+        if not os.path.exists(self.dbPath):
+            logging.info('Database "%s" not found, creating', self.dbPath)
+            create_structure = True
 
             if not os.path.exists(USER_DATA):
                 logging.info('Creating directory structure')
                 os.makedirs(USER_DATA)
 
-        logging.info('Connecting: %s', dbPath)
-        self._connection = sql.connect(dbPath)
+        logging.info('Connecting: %s', self.dbPath)
+        self._connection = sql.connect(self.dbPath)
         self._connection.row_factory = sql.Row
 
-        if createStructure:
+        if create_structure:
             self._create_settings_database()
 
         # Load window geometry
@@ -745,20 +775,20 @@ class SonosList(tk.PanedWindow):
             self._listbox.see(selectIndex)
             self.show_speaker_info(speaker)      
 
-    def __set_config(self, settingName, value):
-        assert settingName is not None
+    def __set_config(self, setting_name, value):
+        assert setting_name is not None
 
         __sql = 'INSERT OR REPLACE INTO config (name, value) VALUES (?, ?)'
 
-        self._connection.execute(__sql, (settingName, value)).close()
+        self._connection.execute(__sql, (setting_name, value)).close()
         self._connection.commit()
         
-    def __get_config(self, settingName):
-        assert settingName is not None
+    def __get_config(self, setting_name):
+        assert setting_name is not None
 
         __sql = 'SELECT value FROM config WHERE name = ? LIMIT 1'
 
-        with clib.closing(self._connection.execute(__sql, (settingName, ))) as cur:
+        with clib.closing(self._connection.execute(__sql, (setting_name, ))) as cur:
             row = cur.fetchone()
 
             if not row:
@@ -787,10 +817,9 @@ class SonosList(tk.PanedWindow):
             );
                 
             CREATE TABLE IF NOT EXISTS images(
-                image_id        INTEGER,
                 uri             TEXT UNIQUE,
                 image           BLOB,
-                PRIMARY KEY(image_id)
+                PRIMARY KEY(uri)
             );
         ''').close()
 
