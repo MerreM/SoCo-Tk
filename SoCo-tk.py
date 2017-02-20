@@ -126,7 +126,7 @@ class SonosList(tk.PanedWindow):
             geometry = self.__parent.geometry()
             if geometry:
                 logging.debug('Storing geometry: "%s"', geometry)
-                self.__setConfig('window_geometry', geometry)
+                self.__set_config('window_geometry', geometry)
 
             listOfPanes = self.panes()
             sashes = []
@@ -138,7 +138,7 @@ class SonosList(tk.PanedWindow):
 
             finalSashValue = ','.join(sashes)
             logging.debug('Storing sashes: "%s"', finalSashValue)
-            self.__setConfig('sash_coordinates', finalSashValue)
+            self.__set_config('sash_coordinates', finalSashValue)
                 
         except:
             logging.error('Error making clean exit')
@@ -393,7 +393,7 @@ class SonosList(tk.PanedWindow):
         if not selection:
             # self.show_speaker_info(None)
             self._update_buttons()
-            self.__setConfig('last_selected', None)
+            self.__set_config('last_selected', None)
             return
 
         index = int(selection[0])
@@ -411,7 +411,7 @@ class SonosList(tk.PanedWindow):
         logging.debug('Zoneplayer: "%s"', speaker)
 
         logging.debug('Storing last_selected: %s' % speaker.speaker_info['uid'])
-        self.__setConfig('last_selected', speaker.speaker_info['uid'])
+        self.__set_config('last_selected', speaker.speaker_info['uid'])
         
 
     def show_speaker_info(self, speaker, refresh_queue=None):
@@ -708,10 +708,10 @@ class SonosList(tk.PanedWindow):
         self._connection.row_factory = sql.Row
 
         if createStructure:
-            self._createSettingsDB()
+            self._create_settings_database()
 
         # Load window geometry
-        geometry = self.__getConfig('window_geometry')
+        geometry = self.__get_config('window_geometry')
         if geometry:
             try:
                 logging.info('Found geometry "%s", applying', geometry)
@@ -728,7 +728,7 @@ class SonosList(tk.PanedWindow):
         if doscan: self.scan_speakers()
 
         # Load last selected speaker
-        selected_speaker_uid = self.__getConfig('last_selected')
+        selected_speaker_uid = self.__get_config('last_selected')
         logging.debug('Last selected speaker: %s', selected_speaker_uid)
 
         selectIndex = None
@@ -745,7 +745,7 @@ class SonosList(tk.PanedWindow):
             self._listbox.see(selectIndex)
             self.show_speaker_info(speaker)      
 
-    def __setConfig(self, settingName, value):
+    def __set_config(self, settingName, value):
         assert settingName is not None
 
         __sql = 'INSERT OR REPLACE INTO config (name, value) VALUES (?, ?)'
@@ -753,7 +753,7 @@ class SonosList(tk.PanedWindow):
         self._connection.execute(__sql, (settingName, value)).close()
         self._connection.commit()
         
-    def __getConfig(self, settingName):
+    def __get_config(self, settingName):
         assert settingName is not None
 
         __sql = 'SELECT value FROM config WHERE name = ? LIMIT 1'
@@ -766,7 +766,7 @@ class SonosList(tk.PanedWindow):
             
             return row['value']
 
-    def _createSettingsDB(self):
+    def _create_settings_database(self):
         logging.debug('Creating tables')
         self._connection.executescript('''
             CREATE TABLE IF NOT EXISTS config(
