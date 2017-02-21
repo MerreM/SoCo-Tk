@@ -9,7 +9,7 @@ import os
 import sqlite3 as sql
 from io import BytesIO
 
-
+from utils import parse_time
 import requests
 from tkinter import messagebox
 
@@ -80,7 +80,6 @@ class SonosList(tk.PanedWindow):
         self.now_playing_widget = {}
 
         self.__last_selected = None
-        self.__last_image = None
         self.__current_speaker = None
         self._connection = None
 
@@ -118,7 +117,10 @@ class SonosList(tk.PanedWindow):
         self.destroy()
 
     def scan_speakers(self):
-        speakers = list(soco.discover())
+        speakers = soco.discover()
+        if not speakers:
+            return logging.debug("No speakers found")
+        speakers = list(speakers)
         logging.debug('Found %d speaker(s)', len(speakers))
         [s.get_speaker_info() for s in speakers]
         self.add_speakers(speakers)
@@ -234,10 +236,17 @@ class SonosList(tk.PanedWindow):
         self._info.rowconfigure(9, weight = 1)
         self._info.columnconfigure(1, weight = 1)
 
-        self.createnow_playing_widgets()
+        self.create_now_playing_widgets()
 
-    def createnow_playing_widgets(self):
+    def create_now_playing_widgets(self):
         info_index = 0
+
+        label = tk.Label(self._info, text = 'Now Playing....')
+        label.grid(row = info_index,
+                   column = 0,
+                   sticky = 'w')
+
+        info_index += 1
 
         ###################################
         # Title
@@ -248,14 +257,14 @@ class SonosList(tk.PanedWindow):
                    sticky = 'w')
         
         self.now_playing_widget['title'] = tk.Label(self._info,
-                                             text = self.empty_info,
-                                             anchor = 'w')
+                                             text=self.empty_info,
+                                             anchor='w')
         
-        self.now_playing_widget['title'].grid(row = info_index,
-                                       column = 1,
-                                       padx = 5,
-                                       pady = 5,
-                                       sticky = 'we')
+        self.now_playing_widget['title'].grid(row=info_index,
+                                       column=1,
+                                       padx=5,
+                                       pady=5,
+                                       sticky='we')
         info_index += 1
 
         ###################################
@@ -316,8 +325,53 @@ class SonosList(tk.PanedWindow):
                                         pady = 5,
                                         sticky = 'we')
 
-        self.now_playing_widget['volume'].bind('<ButtonRelease-1>', self.volume_changed_event)
+        self.now_playing_widget['volume'].bind(
+            '<ButtonRelease-1>', self.volume_changed_event)
+
         info_index += 1
+
+        ###################################
+        # Duration
+        ###################################
+
+        label = tk.Label(self._info, text = 'Position:')
+        label.grid(row = info_index,
+                   column = 0,
+                   sticky = 'w')
+        
+        self.now_playing_widget['position'] = tk.Label(self._info,
+                                             text=self.empty_info,
+                                             anchor='w')
+        
+        self.now_playing_widget['position'].grid(row=info_index,
+                                       column=1,
+                                       padx=5,
+                                       pady=5,
+                                       sticky='we')
+        info_index += 1
+
+        label = tk.Label(self._info, text = 'Duration:')
+        label.grid(row = info_index,
+                   column = 0,
+                   sticky = 'w')
+        
+        self.now_playing_widget['duration'] = tk.Label(self._info,
+                                             text=self.empty_info,
+                                             anchor='w')
+        
+        self.now_playing_widget['duration'].grid(row=info_index,
+                                       column=1,
+                                       padx=5,
+                                       pady=5,
+                                       sticky='we')
+        info_index += 1
+
+        self.now_playing_widget['volume'].bind(
+            '<ButtonRelease-1>', self.volume_changed_event)
+
+        info_index += 1
+
+
 
         ###################################
         # Album art
@@ -383,9 +437,6 @@ class SonosList(tk.PanedWindow):
             self.__queue_content = []
         elif type_name == 'album_art':
             self.now_playing_widget[type_name].config(image = None)
-            if self.__last_image:
-                del self.__last_image
-                self.__last_image = None
         
     def _listbox_selected(self, evt):
         # Note here that Tkinter passes an event object to onselect()
@@ -414,6 +465,35 @@ class SonosList(tk.PanedWindow):
 
         logging.debug('Storing last_selected: %s' % speaker.speaker_info['uid'])
         self.__set_config('last_selected', speaker.speaker_info['uid'])
+
+    def set_now_playing_info(self, track, speaker):
+        BASIC_DATA = ("title", "artist", "album")
+        playing_track = track['uri']
+        track['volume'] = speaker.volume
+
+        for key in BASIC_DATA:
+            label = self.now_playing_widget[key]
+            text = track.get(key) if track.get(key) else self.empty_info
+            label.config(text=text)
+
+        self.clear('album_art')
+
+        art = track.get("album_art")
+        if art:
+            self.set_album_art(art, track_uri=playing_track)
+
+        volume = track.get("volume")
+        if volume:
+            self.now_playing_widget["volume"].set(volume)
+
+        duration = track.get("duration", "0:00:0")
+        position = track.get("position", "0:00:0")
+        duration = parse_time(duration)
+        position = parse_time(position)
+        self.now_playing_widget["duration"].config(text=duration)
+        self.now_playing_widget["position"].config(text=position)
+
+        logging.info("Set track info")
         
 
     def show_speaker_info(self, speaker, refresh_queue=None):
@@ -447,26 +527,7 @@ class SonosList(tk.PanedWindow):
         try:
             logging.info('Receive speaker info from: "%s"' % speaker)
             track = speaker.get_current_track_info()
-            playing_track = track['uri']
-
-            track['volume'] = speaker.volume
-            
-            self.clear('album_art')
-            for info, value in track.items():
-                # import pdb; pdb.set_trace()
-                if info == 'album_art':
-                    self.set_album_art(value, track_uri = playing_track)
-                    continue
-                elif info == 'volume':
-                    self.now_playing_widget[info].set(value)
-                    continue
-                elif info not in self.now_playing_widget:
-                    logging.debug('Skipping info "%s": "%s"', info, value)
-                    continue
-                
-                label = self.now_playing_widget[info]
-                label.config(text = value if value else self.empty_info)
-            logging.info("Set track info")
+            self.set_now_playing_info(track, speaker)
         except:
             errmsg = traceback.format_exc()
             logging.error(errmsg)
@@ -540,10 +601,6 @@ class SonosList(tk.PanedWindow):
         if not url:
             logging.warning('url is empty, returning')
             return
-
-        connection = None
-        new_image = None
-        raw_data = None
         
         # Receive Album art, resize it and show it
         try:
@@ -565,16 +622,11 @@ class SonosList(tk.PanedWindow):
             image.thumbnail(thumbSize,
                             Image.ANTIALIAS)
             new_image = ImageTk.PhotoImage(image = image)
-            self.now_playing_widget['album_art'].config(image = new_image)
+            self.now_playing_widget['album_art'].config(image=new_image)
         except:
             logging.error('Could not set album art, skipping...')
             logging.error(url)
             logging.error(traceback.format_exc())
-        finally:
-            if connection: connection.close()
-            
-            if self.__last_image: del self.__last_image
-            self.__last_image = new_image
 
     def _update_buttons(self):
         logging.debug('Updating control buttons')
