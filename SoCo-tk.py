@@ -8,6 +8,7 @@ import platform
 import os
 import sqlite3 as sql
 from io import BytesIO
+from io import StringIO
 
 from utils import parse_time
 import requests
@@ -39,7 +40,9 @@ except:
     ImageTk = None
     Image = None
 
-logging.basicConfig(format='%(asctime)s %(levelname)10s: %(message)s', level = logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s %(levelname)10s: %(message)s',
+    level = logging.INFO)
 
 USER_DATA = None
 
@@ -96,6 +99,7 @@ class SonosList(tk.PanedWindow):
 
         self._load_settings()
         self._update_buttons()
+        self.set_now_playing_info()
 
     def destroy(self):
         try:
@@ -376,6 +380,12 @@ class SonosList(tk.PanedWindow):
         ###################################
         # Album art
         ###################################
+
+        label = tk.Label(self._info, text = 'Art:')
+        label.grid(row = info_index,
+                   column = 0,
+                   sticky = 'w')
+
         self.now_playing_widget['album_art'] = tk.Label(self._info,
                                                  image = tk.PhotoImage(),
                                                  width = 150,
@@ -444,7 +454,6 @@ class SonosList(tk.PanedWindow):
 
         selection = widget.curselection()
         if not selection:
-            # self.show_speaker_info(None)
             self._update_buttons()
             self.__set_config('last_selected', None)
             return
@@ -466,7 +475,18 @@ class SonosList(tk.PanedWindow):
         logging.debug('Storing last_selected: %s' % speaker.speaker_info['uid'])
         self.__set_config('last_selected', speaker.speaker_info['uid'])
 
-    def set_now_playing_info(self, track, speaker):
+    def set_now_playing_info(self):
+        self.__set_now_playing_info()
+        logging.debug("Tick.")
+        self.__parent.after(1000, self.set_now_playing_info)
+
+    def __set_now_playing_info(self):
+        speaker = self.get_selected_speaker()
+        if speaker:
+            self.set_now_playing_info_from_speaker(speaker)
+
+    def set_now_playing_info_from_speaker(self, speaker):
+        track = speaker.get_current_track_info()
         BASIC_DATA = ("title", "artist", "album")
         playing_track = track['uri']
         track['volume'] = speaker.volume
@@ -481,6 +501,8 @@ class SonosList(tk.PanedWindow):
         art = track.get("album_art")
         if art:
             self.set_album_art(art, track_uri=playing_track)
+        else:
+            self.set_album_art(None)
 
         volume = track.get("volume")
         if volume:
@@ -526,8 +548,7 @@ class SonosList(tk.PanedWindow):
         playing_track = None
         try:
             logging.info('Receive speaker info from: "%s"' % speaker)
-            track = speaker.get_current_track_info()
-            self.set_now_playing_info(track, speaker)
+            self.set_now_playing_info_from_speaker(speaker)
         except:
             errmsg = traceback.format_exc()
             logging.error(errmsg)
@@ -567,29 +588,32 @@ class SonosList(tk.PanedWindow):
                                    message = 'Could not receive speaker queue')
 
 
-    def get_album_art_from_database(self, track_uri):
+    def get_album_art_from_database(self, url):
         if not self._connection:
             logging.error("No database connection to get art from.")
             return None
-        elif not track_uri:
+        elif not url:
             logging.error("No URI to query.")
             return None
         c = self._connection.cursor()
-        c.execute("SELECT * FROM images where uri=?", (track_uri,))
+        c.execute("SELECT * FROM images where uri=?", (url,))
         top_res = c.fetchone()
         if top_res:
-            return top_res[1]
+            data = BytesIO(top_res[1])
+            data.seek(0)
+            return data
         return None
 
-    def set_album_art_in_database(self, track_uri, data):
+    def set_album_art_in_database(self, url, data):
         if not self._connection:
             logging.error("No database connection to get art from.")
             return None
-        elif not track_uri or not data:
+        elif not url or not data:
             logging.error("No URI or data to insert.")
             return None
         c = self._connection.cursor()
-        c.execute("INSERT INTO images VALUES (?, ?)",(track_uri, data))
+        c.execute("INSERT INTO images VALUES (?, ?)",(url, sql.Binary(data)))
+        self._connection.commit()
 
                 
 
@@ -599,21 +623,22 @@ class SonosList(tk.PanedWindow):
             return
 
         if not url:
+            self.now_playing_widget['album_art'].config(image=None)
+            self.now_playing_widget['album_art'].image = None
             logging.warning('url is empty, returning')
             return
-        
+        raw_data = None
         # Receive Album art, resize it and show it
         try:
-
-            raw_data = self.get_album_art_from_database(track_uri)
+            raw_data = self.get_album_art_from_database(url)
 
             if raw_data is None:
-                logging.info('Could not find cached album art, loading from URL')
                 resp = requests.get(url)
-                raw_data = resp.content
-                self.set_album_art_in_database(track_uri, raw_data)
+                logging.info('Could not find cached album art, loading from URL')
+                raw_data = BytesIO(resp.content)
+                raw_data.seek(0)
 
-            image = Image.open(BytesIO(raw_data))
+            image = Image.open(raw_data)
             widgetConfig = self.now_playing_widget['album_art'].config()
             thumbSize = (int(widgetConfig['width'][4]),
                          int(widgetConfig['height'][4]))
@@ -621,8 +646,10 @@ class SonosList(tk.PanedWindow):
             logging.debug('Resizing album art to: %s', thumbSize)
             image.thumbnail(thumbSize,
                             Image.ANTIALIAS)
-            new_image = ImageTk.PhotoImage(image = image)
-            self.now_playing_widget['album_art'].config(image=new_image)
+            newImage = ImageTk.PhotoImage(image = image)
+            self.set_album_art_in_database(url, raw_data)
+            self.now_playing_widget['album_art'].config(image = newImage)
+            self.now_playing_widget['album_art'].image = newImage # W/o a ref, TK drops the image.
         except:
             logging.error('Could not set album art, skipping...')
             logging.error(url)
